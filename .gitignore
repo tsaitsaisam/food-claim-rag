@@ -1,0 +1,34 @@
+# Secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs / runtime
+logs/
+*.log
+
+# Allow ChromaDB & corpus to be committed (intentional, so classmates skip ingest)
+# data/  — NOT ignored
+# corpus/  — NOT ignored
+
+# But ignore launchd / scheduler artifacts
+scripts/run_ingest.sh.log
