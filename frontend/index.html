@@ -180,7 +180,10 @@ function app() {
       try {
         const r = await fetch("/api/ask", {
           method: "POST",
-          headers: {"content-type": "application/json"},
+          headers: {
+            "content-type": "application/json",
+            "ngrok-skip-browser-warning": "true",
+          },
           body: JSON.stringify({claim: this.claim, k_reg: this.k_reg, k_case: this.k_case}),
         });
         if (!r.ok) {
