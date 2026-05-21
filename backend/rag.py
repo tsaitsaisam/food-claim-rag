@@ -1,6 +1,6 @@
 """RAG core: embed query with Gemini, retrieve from ChromaDB, generate with Gemini."""
 from __future__ import annotations
-import json, os
+import json, os, time
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +16,9 @@ load_dotenv(ROOT / ".env")
 
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "gemini-embedding-001")
 CHAT_MODEL = os.environ.get("CHAT_MODEL", "gemini-2.5-flash")
+FALLBACK_MODELS = [m.strip() for m in os.environ.get(
+    "FALLBACK_MODELS", "gemini-2.0-flash,gemini-2.5-flash-lite"
+).split(",") if m.strip()]
 CHROMA_DIR = ROOT / os.environ.get("CHROMA_DIR", "./data/chroma").lstrip("./")
 
 _genai: genai.Client | None = None
@@ -95,17 +98,47 @@ def analyze_claim(claim: str, k_reg: int = 6, k_case: int = 6) -> dict[str, Any]
         cases=format_cases(case_hits),
     )
 
-    resp = genai_client().models.generate_content(
-        model=CHAT_MODEL,
-        contents=user_msg,
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM,
-            response_mime_type="application/json",
-            temperature=0.2,
-            max_output_tokens=4096,
-        ),
+    cfg = types.GenerateContentConfig(
+        system_instruction=SYSTEM,
+        response_mime_type="application/json",
+        temperature=0.2,
+        max_output_tokens=4096,
     )
-    raw = resp.text or ""
+
+    # Try primary model with retries; on persistent failure, try fallbacks.
+    raw = ""
+    model_used = CHAT_MODEL
+    last_err: Exception | None = None
+    candidates = [CHAT_MODEL] + [m for m in FALLBACK_MODELS if m != CHAT_MODEL]
+    for model in candidates:
+        for attempt in range(3):
+            try:
+                resp = genai_client().models.generate_content(
+                    model=model, contents=user_msg, config=cfg,
+                )
+                raw = resp.text or ""
+                model_used = model
+                last_err = None
+                break
+            except Exception as e:
+                msg = str(e)
+                last_err = e
+                # 503 UNAVAILABLE / overloaded → quick retry
+                if "503" in msg or "UNAVAILABLE" in msg or "overload" in msg.lower():
+                    wait = 1.5 * (attempt + 1)
+                    print(f"[{model}] 503 attempt {attempt+1}, retry in {wait}s")
+                    time.sleep(wait)
+                    continue
+                # Anything else: break inner, try next model
+                break
+        if raw:
+            break
+
+    if not raw:
+        raise RuntimeError(
+            f"All Gemini models unavailable (tried: {candidates}). "
+            f"Last error: {last_err}"
+        )
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
@@ -116,7 +149,7 @@ def analyze_claim(claim: str, k_reg: int = 6, k_case: int = 6) -> dict[str, Any]
         }
 
     parsed["_debug"] = {
-        "model": CHAT_MODEL,
+        "model": model_used,
         "embed_model": EMBED_MODEL,
         "retrieved_regulations": [
             {"filename": h["metadata"].get("filename"),

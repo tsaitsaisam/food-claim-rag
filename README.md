@@ -1,3 +1,14 @@
+---
+title: Food Claim Compliance RAG
+emoji: 🍃
+colorFrom: green
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+short_description: 食品/健康食品宣稱合規檢查 RAG 系統
+---
+
 # 食品 / 健康食品宣稱合規檢查 RAG 系統
 
 > 輸入產品宣稱文字，自動回覆三段式分析：
