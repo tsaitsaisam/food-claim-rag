@@ -8,9 +8,9 @@
 <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", sans-serif; }
-  .badge { @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium; }
   details > summary { list-style: none; cursor: pointer; }
   details > summary::-webkit-details-marker { display: none; }
+  .badge { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen">
@@ -35,7 +35,10 @@
         :disabled="loading || !claim.trim()"
         class="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-sm px-4 py-2 rounded-lg font-medium transition">
         <span x-show="!loading">送出分析</span>
-        <span x-show="loading">分析中…</span>
+        <span x-show="loading" class="flex items-center gap-2">
+          <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l4-4-4-4v4a12 12 0 100 24v-4a8 8 0 01-8-8z"/></svg>
+          分析中…
+        </span>
       </button>
 
       <div class="text-xs text-slate-500 flex items-center gap-3">
@@ -49,116 +52,176 @@
 
       <button @click="loadExample()" class="text-xs text-blue-600 hover:underline ml-auto">載入範例宣稱</button>
     </div>
-
-    <div x-show="error" class="mt-3 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700" x-text="error"></div>
   </section>
 
-  <!-- Result -->
-  <template x-if="result && !result.error">
+  <!-- Categorized error display -->
+  <template x-if="errorObj">
+    <section class="bg-white rounded-xl shadow-sm border border-red-200 p-4 mb-6">
+      <div class="flex items-start gap-3">
+        <div class="text-2xl" x-text="errorIcon(errorObj.code)"></div>
+        <div class="flex-1">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="badge text-white" :style="`background:${errorColor(errorObj.code)}`" x-text="errorLabel(errorObj.code)"></span>
+            <span class="text-xs text-slate-400" x-text="errorObj.code"></span>
+          </div>
+          <div class="text-sm font-medium text-slate-900 mb-1" x-text="errorObj.message"></div>
+          <div class="text-xs text-slate-600 mb-2" x-text="errorAdvice(errorObj.code)"></div>
+          <details x-show="errorObj.detail" class="text-xs">
+            <summary class="text-slate-400 hover:text-slate-600">技術細節</summary>
+            <pre class="mt-2 p-2 bg-slate-50 rounded overflow-x-auto" x-text="errorObj.detail"></pre>
+          </details>
+          <div class="mt-3 flex gap-2">
+            <button @click="submit()" :disabled="loading"
+              class="text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-3 py-1.5 rounded">重試</button>
+            <button @click="errorObj=null" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded">關閉</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </template>
+
+  <!-- Three-card result -->
+  <template x-if="result">
 
     <div class="space-y-5">
 
-      <!-- Part 1: Legal analysis -->
+      <!-- Card 1: Legal analysis -->
       <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div class="flex items-center gap-2 mb-3">
           <span class="bg-red-100 text-red-700 text-xs font-semibold px-2 py-0.5 rounded">1</span>
           <h2 class="text-lg font-bold text-slate-900">法規分析</h2>
         </div>
-        <p class="text-sm text-slate-700 leading-relaxed mb-4" x-text="result.legal_analysis?.summary"></p>
 
-        <template x-for="(v, i) in result.legal_analysis?.violations || []" :key="i">
+        <template x-if="legalSummary()">
+          <p class="text-sm text-slate-700 leading-relaxed mb-4" x-text="legalSummary()"></p>
+        </template>
+        <template x-if="!legalSummary()">
+          <p class="text-sm text-slate-400 italic mb-4">（模型未提供總結）</p>
+        </template>
+
+        <template x-if="violations().length === 0">
+          <div class="text-sm text-slate-500 bg-slate-50 p-3 rounded">本次未識別出明顯違規點。</div>
+        </template>
+
+        <template x-for="(v, i) in violations()" :key="i">
           <div class="border-l-4 border-red-400 bg-red-50/40 p-3 mb-2 rounded-r">
             <div class="text-sm font-medium text-slate-900 mb-1">
               <span class="text-red-700">違規點 <span x-text="i+1"></span>：</span>
-              <span x-text="v.issue"></span>
+              <span x-text="v.issue || '（未指明問題語句）'"></span>
             </div>
             <div class="text-xs text-slate-600 mb-1">
               <span class="font-semibold text-slate-700">法條依據：</span>
-              <span x-text="v.legal_basis"></span>
+              <span x-text="v.legal_basis || '（未提供法條）'"></span>
             </div>
-            <div class="text-xs text-slate-600 leading-relaxed" x-text="v.explanation"></div>
+            <div class="text-xs text-slate-600 leading-relaxed" x-text="v.explanation || ''"></div>
           </div>
         </template>
       </section>
 
-      <!-- Part 2: Similar cases -->
+      <!-- Card 2: Similar cases -->
       <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div class="flex items-center gap-2 mb-3">
           <span class="bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5 rounded">2</span>
           <h2 class="text-lg font-bold text-slate-900">類似裁罰案例（114/115 年）</h2>
+          <span class="text-xs text-slate-400 ml-auto" x-text="`共 ${cases().length} 件`"></span>
         </div>
-        <template x-if="(result.similar_cases?.length || 0) === 0">
-          <p class="text-sm text-slate-500">無相似案例可供參考。</p>
+
+        <template x-if="cases().length === 0">
+          <p class="text-sm text-slate-500 bg-slate-50 p-3 rounded">無相似案例可供參考（這不代表合法，仍須依法規分析判斷）。</p>
         </template>
-        <template x-for="(c, i) in result.similar_cases || []" :key="i">
+
+        <template x-for="(c, i) in cases()" :key="i">
           <div class="border border-slate-200 rounded-lg p-3 mb-2 hover:bg-slate-50">
             <div class="flex flex-wrap items-center gap-2 mb-1">
-              <span class="bg-slate-100 text-slate-700 text-xs px-2 py-0.5 rounded font-medium" x-text="c.year_month"></span>
-              <span class="text-sm font-semibold text-slate-900" x-text="c.product"></span>
-              <span class="text-xs text-slate-500" x-text="'｜' + c.company"></span>
-              <span class="ml-auto bg-red-600 text-white text-xs px-2 py-0.5 rounded font-bold">罰 <span x-text="c.fine"></span> 元</span>
+              <span class="bg-slate-100 text-slate-700 text-xs px-2 py-0.5 rounded font-medium" x-text="c.year_month || '—'"></span>
+              <span class="text-sm font-semibold text-slate-900" x-text="c.product || '（未指明產品）'"></span>
+              <template x-if="c.company">
+                <span class="text-xs text-slate-500" x-text="'｜' + c.company"></span>
+              </template>
+              <template x-if="c.fine">
+                <span class="ml-auto bg-red-600 text-white text-xs px-2 py-0.5 rounded font-bold">
+                  罰 <span x-text="formatFine(c.fine)"></span> 元
+                </span>
+              </template>
             </div>
-            <div class="text-xs text-slate-600 mb-1">
-              <span class="font-semibold">罰則：</span><span x-text="c.penalty_basis"></span>
-            </div>
-            <div class="text-xs text-slate-700 italic bg-amber-50/50 p-2 rounded" x-text="'「' + c.key_violation_phrase + '」'"></div>
+            <template x-if="c.penalty_basis">
+              <div class="text-xs text-slate-600 mb-1">
+                <span class="font-semibold">罰則：</span><span x-text="c.penalty_basis"></span>
+              </div>
+            </template>
+            <template x-if="c.key_violation_phrase">
+              <div class="text-xs text-slate-700 italic bg-amber-50/50 p-2 rounded" x-text="'「' + c.key_violation_phrase + '」'"></div>
+            </template>
           </div>
         </template>
       </section>
 
-      <!-- Part 3: Suggested revision -->
+      <!-- Card 3: Suggested revision -->
       <section class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
         <div class="flex items-center gap-2 mb-3">
           <span class="bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-0.5 rounded">3</span>
           <h2 class="text-lg font-bold text-slate-900">建議修改</h2>
         </div>
-        <div class="bg-emerald-50/60 border border-emerald-200 rounded-lg p-4 mb-3">
-          <div class="text-xs font-semibold text-emerald-800 mb-1">建議的合法宣稱文字</div>
-          <div class="text-sm text-slate-900 whitespace-pre-wrap leading-relaxed" x-text="result.suggested_revision?.revised_text"></div>
-        </div>
 
-        <div class="text-xs font-semibold text-slate-700 mb-1">修改說明</div>
-        <ul class="list-disc list-inside text-xs text-slate-600 space-y-1">
-          <template x-for="(c, i) in result.suggested_revision?.changes_explained || []" :key="i">
-            <li x-text="c"></li>
-          </template>
-        </ul>
+        <template x-if="revisedText()">
+          <div class="bg-emerald-50/60 border border-emerald-200 rounded-lg p-4 mb-3">
+            <div class="flex items-center justify-between mb-1">
+              <div class="text-xs font-semibold text-emerald-800">建議的合法宣稱文字</div>
+              <button @click="copyRevised()" class="text-xs text-emerald-700 hover:text-emerald-900 underline">複製</button>
+            </div>
+            <div class="text-sm text-slate-900 whitespace-pre-wrap leading-relaxed" x-text="revisedText()"></div>
+          </div>
+        </template>
+        <template x-if="!revisedText()">
+          <div class="text-sm text-slate-400 italic mb-3">（模型未提供修改建議）</div>
+        </template>
+
+        <template x-if="changesExplained().length > 0">
+          <div>
+            <div class="text-xs font-semibold text-slate-700 mb-1">修改說明</div>
+            <ul class="list-disc list-inside text-xs text-slate-600 space-y-1">
+              <template x-for="(c, i) in changesExplained()" :key="i">
+                <li x-text="c"></li>
+              </template>
+            </ul>
+          </div>
+        </template>
       </section>
 
-      <!-- Debug: retrieved sources -->
+      <!-- Debug -->
       <details class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
         <summary class="text-sm font-medium text-slate-700 flex items-center gap-2">
-          <span>檢索來源（debug）</span>
+          <span>檢索來源 / 模型資訊（debug）</span>
           <span class="text-xs text-slate-400">點擊展開</span>
         </summary>
-        <div class="mt-3 grid md:grid-cols-2 gap-3 text-xs">
-          <div>
-            <div class="font-semibold mb-1 text-slate-700">法規片段（前 K 筆）</div>
-            <template x-for="r in result._debug?.retrieved_regulations || []">
-              <div class="border-b py-1 text-slate-600">
-                <div class="truncate" x-text="r.filename"></div>
-                <div class="text-slate-400">分類：<span x-text="r.category"></span>｜距離：<span x-text="r.distance?.toFixed(3)"></span></div>
-              </div>
-            </template>
+        <div class="mt-3 space-y-3">
+          <div class="text-xs text-slate-600">
+            <span class="font-semibold">生成模型：</span><span x-text="result._debug?.model || 'n/a'"></span>
+            ｜<span class="font-semibold">Embedding：</span><span x-text="result._debug?.embed_model || 'n/a'"></span>
+            ｜<span class="font-semibold">過載重試：</span><span x-text="result._debug?.overload_retries ?? 0"></span> 次
           </div>
-          <div>
-            <div class="font-semibold mb-1 text-slate-700">案例（前 K 筆）</div>
-            <template x-for="c in result._debug?.retrieved_cases || []">
-              <div class="border-b py-1 text-slate-600">
-                <div class="truncate"><span x-text="c.year_month"></span>｜<span x-text="c.product"></span></div>
-                <div class="text-slate-400">罰 <span x-text="c.fine"></span> 元｜距離：<span x-text="c.distance?.toFixed(3)"></span></div>
-              </div>
-            </template>
+          <div class="grid md:grid-cols-2 gap-3 text-xs">
+            <div>
+              <div class="font-semibold mb-1 text-slate-700">法規片段（檢索 Top-K）</div>
+              <template x-for="(r,i) in result._debug?.retrieved_regulations || []" :key="i">
+                <div class="border-b py-1 text-slate-600">
+                  <div class="truncate" x-text="r.filename || '—'"></div>
+                  <div class="text-slate-400">分類：<span x-text="r.category || '—'"></span>｜距離：<span x-text="(r.distance ?? 0).toFixed(3)"></span></div>
+                </div>
+              </template>
+            </div>
+            <div>
+              <div class="font-semibold mb-1 text-slate-700">案例（檢索 Top-K）</div>
+              <template x-for="(c,i) in result._debug?.retrieved_cases || []" :key="i">
+                <div class="border-b py-1 text-slate-600">
+                  <div class="truncate"><span x-text="c.year_month"></span>｜<span x-text="c.product || '—'"></span></div>
+                  <div class="text-slate-400">罰 <span x-text="c.fine || '—'"></span> 元｜距離：<span x-text="(c.distance ?? 0).toFixed(3)"></span></div>
+                </div>
+              </template>
+            </div>
           </div>
         </div>
       </details>
-    </div>
-  </template>
-
-  <template x-if="result && result.error">
-    <div class="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800">
-      <div class="font-semibold mb-1">模型輸出格式異常</div>
-      <pre class="whitespace-pre-wrap text-xs" x-text="result.raw"></pre>
     </div>
   </template>
 
@@ -171,11 +234,79 @@ function app() {
     k_reg: 6,
     k_case: 6,
     loading: false,
-    error: "",
+    errorObj: null,    // {code, message, detail}
     result: null,
+
+    // ── Defensive accessors (handle missing fields gracefully) ──
+    legalSummary() { return this.result?.legal_analysis?.summary?.trim() || ""; },
+    violations()   { return this.result?.legal_analysis?.violations || []; },
+    cases()        { return this.result?.similar_cases || []; },
+    revisedText()  { return this.result?.suggested_revision?.revised_text?.trim() || ""; },
+    changesExplained() { return this.result?.suggested_revision?.changes_explained || []; },
+
+    formatFine(f) {
+      if (!f) return "—";
+      const n = String(f).replace(/[^0-9]/g, "");
+      if (!n) return f;
+      return Number(n).toLocaleString("zh-TW");
+    },
+
+    async copyRevised() {
+      try {
+        await navigator.clipboard.writeText(this.revisedText());
+        alert("已複製到剪貼簿");
+      } catch (e) { alert("複製失敗：" + e); }
+    },
+
+    // ── Error display helpers ──
+    errorIcon(code) {
+      return {
+        quota_exceeded: "⏳",
+        model_overloaded: "🔥",
+        empty_retrieval: "📭",
+        parse_error: "🧩",
+        auth_error: "🔑",
+        network_error: "📡",
+        internal_error: "🛠",
+      }[code] || "⚠️";
+    },
+    errorColor(code) {
+      return {
+        quota_exceeded: "#d97706",
+        model_overloaded: "#dc2626",
+        empty_retrieval: "#0891b2",
+        parse_error: "#9333ea",
+        auth_error: "#7c2d12",
+        network_error: "#475569",
+        internal_error: "#525252",
+      }[code] || "#525252";
+    },
+    errorLabel(code) {
+      return {
+        quota_exceeded: "API 額度用完",
+        model_overloaded: "模型擁塞",
+        empty_retrieval: "檢索無結果",
+        parse_error: "回應格式異常",
+        auth_error: "認證失敗",
+        network_error: "網路錯誤",
+        internal_error: "系統錯誤",
+      }[code] || "未知錯誤";
+    },
+    errorAdvice(code) {
+      return {
+        quota_exceeded: "建議：等待台灣時間下午 3 點額度重置，或在 Gemini 後台開啟 Billing。",
+        model_overloaded: "建議：稍候 10-30 秒按「重試」。Gemini 高峰期常發生。",
+        empty_retrieval: "建議：聯絡管理員確認 ChromaDB 索引狀態。",
+        parse_error: "建議：直接重試。若連續失敗，請縮短輸入文字或聯絡管理員。",
+        auth_error: "建議：請管理員檢查 GEMINI_API_KEY 環境變數設定。",
+        network_error: "建議：檢查網路連線後重試。",
+        internal_error: "建議：稍後再試；持續失敗請回報管理員。",
+      }[code] || "建議：請稍後再試。";
+    },
+
     async submit() {
       this.loading = true;
-      this.error = "";
+      this.errorObj = null;
       this.result = null;
       try {
         const r = await fetch("/api/ask", {
@@ -186,21 +317,39 @@ function app() {
           },
           body: JSON.stringify({claim: this.claim, k_reg: this.k_reg, k_case: this.k_case}),
         });
+        const data = await r.json().catch(() => null);
+
         if (!r.ok) {
-          const t = await r.text();
-          this.error = `HTTP ${r.status}: ${t}`;
+          // Backend returns categorized error object
+          if (data && data.error) {
+            this.errorObj = data.error;
+          } else {
+            this.errorObj = {
+              code: "internal_error",
+              message: `HTTP ${r.status}：伺服器回應異常。`,
+              detail: typeof data === "string" ? data : JSON.stringify(data || {}),
+            };
+          }
+        } else if (data && data.error) {
+          // 200 but with error envelope (shouldn't normally happen, defensive)
+          this.errorObj = data.error;
         } else {
-          this.result = await r.json();
+          this.result = data;
         }
       } catch (e) {
-        this.error = String(e);
+        this.errorObj = {
+          code: "network_error",
+          message: "無法連線到伺服器。",
+          detail: String(e),
+        };
       } finally {
         this.loading = false;
       }
     },
+
     loadExample() {
       this.claim = "本產品『樟芝精華膠囊』採用百分百牛樟芝子實體萃取，可有效抑制癌細胞、提升免疫力、預防腫瘤復發，臨床實驗證明能改善肝功能與降低血糖，糖尿病患長期服用可減少胰島素依賴，對化療病患效果加倍。";
-    }
+    },
   }
 }
 </script>
