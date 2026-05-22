@@ -233,7 +233,9 @@ def analyze_claim(claim: str, k_reg: int = 6, k_case: int = 6) -> dict[str, Any]
         response_mime_type="application/json",
         response_schema=ComplianceResponse,  # ← structured-output enforcement
         temperature=0.2,
-        max_output_tokens=4096,
+        # 中文回應每字 1-2 tokens；6 violations + 3 cases + 改寫 + 變更說明
+        # 約需 5-7k tokens。預留到 16k 避免被切斷。
+        max_output_tokens=16384,
     )
 
     # 2. Generate with retries + model fallback
@@ -277,6 +279,15 @@ def analyze_claim(claim: str, k_reg: int = 6, k_case: int = 6) -> dict[str, Any]
     # 3. Parse + validate with Pydantic
     parsed_dict = _try_parse_json(raw)
     if parsed_dict is None:
+        # Detect truncation (unbalanced braces) to give a clearer hint
+        open_braces = raw.count("{") - raw.count("}")
+        if open_braces > 0:
+            raise ResponseParseError(
+                f"Model output was truncated mid-JSON ({open_braces} unbalanced braces). "
+                f"This usually means the response exceeded max_output_tokens. "
+                f"Tail: …{raw[-200:]}",
+                user_message="模型回應在中途被截斷（內容過長）。請減少檢索 K 值或縮短輸入後重試。",
+            )
         raise ResponseParseError(f"Could not extract JSON from output. First 200 chars: {raw[:200]}")
 
     try:

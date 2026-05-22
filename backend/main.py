@@ -74,4 +74,12 @@ if FRONTEND.exists():
 
     @app.get("/")
     def root():
-        return FileResponse(FRONTEND / "index.html")
+        return FileResponse(
+            FRONTEND / "index.html",
+            headers={
+                # No-cache so users always get the latest frontend on deploy
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
